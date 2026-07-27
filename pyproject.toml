@@ -1,0 +1,53 @@
+[project]
+name = "judicial-listings"
+version = "0.1.0"
+description = "Update and verify All ER judicial-listing tables in RTF files"
+authors = [
+    { name = "marcovzla", email = "marcovalenzuelaescarcega@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.13.4",
+    "requests>=2.34.2",
+    "typer>=0.27.0",
+]
+
+[project.scripts]
+judicial-listings = "judicial_listings.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.1,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.16.0",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "RUF",
+    "UP",
+    "N",
+    "C4",
+    "PIE",
+    "RET",
+    "SIM",
+    "ARG",
+    "DTZ",
+    "PTH",
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportDeprecated = "warning"
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
