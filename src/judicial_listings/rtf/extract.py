@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 from ..roster_types import (
@@ -12,6 +13,7 @@ from ..roster_types import (
     RosterSection,
     clean_space,
     normalize_name,
+    parse_appointment_annotation,
 )
 from .text import RevisionView, TableOccurrence, decode_cells, find_table_body
 
@@ -45,17 +47,29 @@ def extract_columns(
     return {"left": left, "right": right}
 
 
-def split_inline_name_position(line: str) -> tuple[str, str]:
+def split_inline_name_details(line: str) -> tuple[str, str, date | None]:
     match = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", line)
     if match:
-        return clean_space(match.group(1)), clean_space(match.group(2))
-    return clean_space(line), ""
+        suffix = clean_space(match.group(2))
+        appointment = parse_appointment_annotation(suffix)
+        return (
+            clean_space(match.group(1)),
+            "" if appointment is not None else suffix,
+            appointment,
+        )
+    return clean_space(line), "", None
 
 
-def make_judge(name: str, position: str, lines: list[str]) -> Judge:
+def make_judge(
+    name: str,
+    position: str,
+    first_listing_appointment: date | None,
+    lines: list[str],
+) -> Judge:
     return Judge(
         name=name,
         position=clean_space(position).strip("()").strip(),
+        first_listing_appointment=first_listing_appointment,
         lines=tuple(lines),
     )
 
@@ -63,13 +77,14 @@ def make_judge(name: str, position: str, lines: list[str]) -> Judge:
 def parse_people(columns: dict[str, list[str]]) -> list[Judge]:
     """Collapse column-list cells into judge records for comparison.
 
-    A judge begins at a title/name line. Following non-name lines are treated as
-    position fragments and joined, with surrounding parentheses removed.
+    A judge begins at a title/name line. Appointment annotations are captured
+    separately; other following lines are joined as position fragments.
     """
     judges: list[Judge] = []
     for side in ("left", "right"):
         name = ""
         position = ""
+        first_listing_appointment: date | None = None
         lines: list[str] = []
 
         for raw in columns.get(side, []):
@@ -78,17 +93,34 @@ def parse_people(columns: dict[str, list[str]]) -> list[Judge]:
                 continue
             if NAME_RE.match(line):
                 if name:
-                    judges.append(make_judge(name, position, lines))
-                parsed_name, position = split_inline_name_position(line)
+                    judges.append(
+                        make_judge(
+                            name,
+                            position,
+                            first_listing_appointment,
+                            lines,
+                        )
+                    )
+                parsed_name, position, first_listing_appointment = (
+                    split_inline_name_details(line)
+                )
                 name = normalize_name(parsed_name)
                 lines = [line]
             elif name:
                 lines.append(line)
-                position = clean_space(
-                    " ".join(part for part in [position, line] if part).strip("()")
-                )
+                appointment = parse_appointment_annotation(line)
+                if appointment is not None and first_listing_appointment is None:
+                    first_listing_appointment = appointment
+                else:
+                    position = clean_space(
+                        " ".join(part for part in [position, line] if part).strip(
+                            "()"
+                        )
+                    )
         if name:
-            judges.append(make_judge(name, position, lines))
+            judges.append(
+                make_judge(name, position, first_listing_appointment, lines)
+            )
 
     return judges
 

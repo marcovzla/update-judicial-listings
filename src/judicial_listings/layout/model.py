@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
-from ..roster_types import ImmutableModel, JudicialSection, clean_space
+from ..roster_types import (
+    ImmutableModel,
+    JudicialSection,
+    appointment_note,
+    clean_space,
+)
 
 
 class SplitStatus(StrEnum):
     INLINE = "inline"
     NAME_POSITION = "name_position"
+    NAME_APPOINTMENT = "name_appointment"
+    NAME_POSITION_APPOINTMENT = "name_position_appointment"
     PENDING = "pending"
     ACCEPTED = "accepted"
 
@@ -21,6 +29,7 @@ class LayoutBlock(ImmutableModel):
     id: str
     name: str
     position: str
+    first_listing_appointment: date | None = None
     lines: tuple[str, ...]
     split_status: SplitStatus
 
@@ -91,6 +100,31 @@ def person_display_line(name: str, position: str) -> str:
 
 def position_line(position: str) -> str:
     return f"({position})"
+
+
+def name_appointment_lines(block: LayoutBlock) -> tuple[str, ...]:
+    appointment = block.first_listing_appointment
+    if appointment is None:
+        return (block.name,)
+    if block.position:
+        raise ValueError(f"{block.id}: annotated name lines require no position")
+    note = appointment_note(appointment)
+    combined = f"{block.name} {note}"
+    if block.lines and block.lines[0] == combined:
+        return (combined,)
+    if block.lines[:2] == (block.name, note):
+        return (block.name, note)
+    raise ValueError(f"{block.id}: appointment annotation lines are invalid")
+
+
+def position_split_lines(block: LayoutBlock) -> tuple[str, ...]:
+    appointment = block.first_listing_appointment
+    if appointment is None:
+        return block.lines[1:]
+    note = appointment_note(appointment)
+    if block.lines[0] != block.name or block.lines[-1] != note:
+        raise ValueError(f"{block.id}: annotated position lines are invalid")
+    return block.lines[1:-1]
 
 
 def normalize_position_text(value: str) -> str:
@@ -169,6 +203,36 @@ def validate_block(block: LayoutBlock, *, require_no_pending: bool = False) -> N
         if not clean_space(line):
             raise ValueError(f"{block.id}: line {index} is empty")
 
+    if block.first_listing_appointment is not None:
+        note = appointment_note(block.first_listing_appointment)
+        if not block.position:
+            name_lines = name_appointment_lines(block)
+            if block.split_status != SplitStatus.NAME_APPOINTMENT:
+                raise ValueError(
+                    f"{block.id}: annotated name has invalid split status"
+                )
+            if block.lines != name_lines:
+                raise ValueError(f"{block.id}: annotated name lines are invalid")
+            return
+
+        if block.split_status == SplitStatus.NAME_POSITION_APPOINTMENT:
+            expected = (block.name, position_line(block.position), note)
+            if block.lines != expected:
+                raise ValueError(
+                    f"{block.id}: annotated name/position/appointment lines are invalid"
+                )
+            return
+        if block.split_status not in (SplitStatus.PENDING, SplitStatus.ACCEPTED):
+            raise ValueError(
+                f"{block.id}: annotated position has invalid split status"
+            )
+        validate_position_split(
+            block.id,
+            block.position,
+            position_split_lines(block),
+        )
+        return
+
     if block.split_status == SplitStatus.INLINE:
         expected = (person_display_line(block.name, block.position),)
         if block.lines != expected:
@@ -230,7 +294,7 @@ def decisions_from_plan(plan: LayoutPlan) -> LayoutDecisions:
         column_breaks[table.section] = table.column_break_after
         for block in table.blocks:
             if block.split_status == SplitStatus.PENDING:
-                splits[block.id] = block.lines[1:]
+                splits[block.id] = position_split_lines(block)
 
     return LayoutDecisions(
         splits=splits,
@@ -282,9 +346,11 @@ def apply_split_decision(
     split_lines: tuple[str, ...],
 ) -> LayoutBlock:
     cleaned_lines = validate_position_split(block.id, block.position, split_lines)
+    appointment = block.first_listing_appointment
+    suffix = (appointment_note(appointment),) if appointment is not None else ()
     return block.model_copy(
         update={
-            "lines": (block.name, *cleaned_lines),
+            "lines": (block.name, *cleaned_lines, *suffix),
             "split_status": SplitStatus.ACCEPTED,
         }
     )

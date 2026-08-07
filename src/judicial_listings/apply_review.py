@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from .prepare import REVIEW_ITEMS_NAME
+from .publication_policy import apply_first_listing_policy
 from .roster_comparison import DifferenceKind, RosterDifference, RosterEntry
 from .roster_review import (
     OrderReviewItem,
@@ -38,6 +39,7 @@ class ManualReviewEntry(ImmutableModel):
     order: int = Field(ge=1)
     name: str = Field(min_length=1)
     position: str = ""
+    first_listing_appointment: date | None = None
 
 
 class ReviewDecision(ImmutableModel):
@@ -154,6 +156,11 @@ class ResolvedRosterEditor:
             {
                 "name": name,
                 "position": clean_space(entry.position),
+                "first_listing_appointment": (
+                    entry.first_listing_appointment.isoformat()
+                    if entry.first_listing_appointment is not None
+                    else None
+                ),
                 "source": "manual review decision",
             },
         )
@@ -189,6 +196,21 @@ class ResolvedRosterEditor:
                 continue
             moved = judges.pop(index)
             judges.insert(max(0, min(order - 1, len(judges))), moved)
+            return
+
+    def set_first_listing_appointment(
+        self,
+        section: JudicialSection,
+        key: str,
+        appointment: date | None,
+    ) -> None:
+        for value in self.judges(section):
+            judge = _as_mapping(value, f"resolved.{section.value}.judges[]")
+            if person_key(str(judge.get("name", ""))) != key:
+                continue
+            judge["first_listing_appointment"] = (
+                appointment.isoformat() if appointment is not None else None
+            )
             return
 
     def result(self) -> Roster:
@@ -233,6 +255,16 @@ def _apply_keep_current_difference(
             difference.key,
             position=rtf.judge.position,
         )
+    elif (
+        difference.kind is DifferenceKind.FIRST_LISTING_APPOINTMENT_CHANGED
+        and rtf is not None
+        and official is not None
+    ):
+        editor.set_first_listing_appointment(
+            official.section,
+            difference.key,
+            rtf.judge.first_listing_appointment,
+        )
     elif difference.kind is DifferenceKind.ORDER_CHANGED and rtf is not None:
         editor.move_to_order(rtf.section, difference.key, rtf.order)
     else:
@@ -276,6 +308,8 @@ def _apply_review(run: Path, decisions_path: Path) -> AppliedReview:
     )
     official_path = _input_path(review_items_path, review.inputs.official_roster)
     official = Roster.model_validate_json(official_path.read_text(encoding="utf-8"))
+    rtf_path = _input_path(review_items_path, review.inputs.rtf_roster)
+    rtf = Roster.model_validate_json(rtf_path.read_text(encoding="utf-8"))
     decisions = ReviewDecisions.model_validate_json(
         decisions_path.read_text(encoding="utf-8")
     )
@@ -286,7 +320,7 @@ def _apply_review(run: Path, decisions_path: Path) -> AppliedReview:
     if missing:
         raise ValueError(f"missing review decisions for: {', '.join(missing)}")
 
-    editor = ResolvedRosterEditor(official)
+    editor = ResolvedRosterEditor(apply_first_listing_policy(rtf, official))
     approved: list[ApprovedChange] = []
     for item in review.items:
         decision = decisions.decisions[item.id]

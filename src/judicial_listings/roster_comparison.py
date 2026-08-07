@@ -22,6 +22,7 @@ class DifferenceKind(StrEnum):
     MOVED = "moved"
     NAME_CHANGED = "name_changed"
     POSITION_CHANGED = "position_changed"
+    FIRST_LISTING_APPOINTMENT_CHANGED = "first_listing_appointment_changed"
     ORDER_CHANGED = "order_changed"
 
 
@@ -207,6 +208,18 @@ def _content_differences(
             differences.append(
                 RosterDifference(
                     kind=DifferenceKind.POSITION_CHANGED,
+                    key=key,
+                    rtf=rtf,
+                    official=official,
+                )
+            )
+        if (
+            rtf.judge.first_listing_appointment
+            != official.judge.first_listing_appointment
+        ):
+            differences.append(
+                RosterDifference(
+                    kind=DifferenceKind.FIRST_LISTING_APPOINTMENT_CHANGED,
                     key=key,
                     rtf=rtf,
                     official=official,

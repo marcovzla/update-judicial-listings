@@ -5,7 +5,13 @@ from __future__ import annotations
 from enum import IntEnum
 from itertools import combinations
 
-from ..roster_types import ImmutableModel, JudicialSection, Roster, clean_space
+from ..roster_types import (
+    ImmutableModel,
+    JudicialSection,
+    Roster,
+    appointment_note,
+    clean_space,
+)
 from ..rtf.arial import FONT_NAME, text_width_points
 from ..rtf.geometry import RtfGeometry
 from .model import block_id_for, person_display_line, position_line
@@ -111,11 +117,24 @@ def create_split_requests(
             name = clean_space(judge.name)
             position = clean_space(judge.position)
             block = block_id_for(section, source_order, name)
-            if text_width_points(name, font_size_points) > available_width_points:
-                raise ValueError(f"{block}: name does not fit on one line")
+            appointment = judge.first_listing_appointment
+            if appointment is None:
+                if text_width_points(name, font_size_points) > available_width_points:
+                    raise ValueError(f"{block}: name does not fit on one line")
+            else:
+                note = appointment_note(appointment)
+                for line in (name, note):
+                    if (
+                        text_width_points(line, font_size_points)
+                        > available_width_points
+                    ):
+                        raise ValueError(
+                            f"{block}: appointment annotation does not fit "
+                            "on one line"
+                        )
             if not position:
                 continue
-            if (
+            if appointment is None and (
                 text_width_points(
                     person_display_line(name, position),
                     font_size_points,

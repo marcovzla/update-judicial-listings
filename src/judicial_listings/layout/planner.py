@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..roster_types import Judge, JudicialSection, Roster, clean_space
+from ..roster_types import (
+    Judge,
+    JudicialSection,
+    Roster,
+    appointment_note,
+    clean_space,
+)
 from ..rtf.arial import text_width_points
 from ..rtf.geometry import RtfGeometry
 from .model import (
@@ -16,6 +22,7 @@ from .model import (
     decisions_from_plan,
     person_display_line,
     position_line,
+    position_split_lines,
     validate_plan,
     write_decisions,
     write_plan,
@@ -120,6 +127,57 @@ def initial_block(
     name = clean_space(judge.name)
     position = clean_space(judge.position)
     block_id = block_id_for(section, source_order, name)
+    appointment = judge.first_listing_appointment
+    if appointment is not None:
+        note = appointment_note(appointment)
+        for line in (name, note):
+            if text_width_points(line, font_size_points) > available_width_points:
+                raise ValueError(
+                    f"{block_id}: appointment annotation does not fit on one line"
+                )
+
+        if not position:
+            combined_name = f"{name} {note}"
+            name_lines = (
+                (combined_name,)
+                if text_width_points(combined_name, font_size_points)
+                <= available_width_points
+                else (name, note)
+            )
+            return LayoutBlock(
+                id=block_id,
+                name=name,
+                position="",
+                first_listing_appointment=appointment,
+                lines=name_lines,
+                split_status=SplitStatus.NAME_APPOINTMENT,
+            )
+
+        whole_position_line = position_line(position)
+        if split_request is None:
+            return LayoutBlock(
+                id=block_id,
+                name=name,
+                position=position,
+                first_listing_appointment=appointment,
+                lines=(name, whole_position_line, note),
+                split_status=SplitStatus.NAME_POSITION_APPOINTMENT,
+            )
+
+        split_lines = propose_position_split(
+            position,
+            split_request,
+            font_size_points,
+        )
+        return LayoutBlock(
+            id=block_id,
+            name=name,
+            position=position,
+            first_listing_appointment=appointment,
+            lines=(name, *split_lines, note),
+            split_status=SplitStatus.ACCEPTED,
+        )
+
     if not position:
         return LayoutBlock(
             id=block_id,
@@ -270,7 +328,7 @@ def diagnostics_markdown(plan: LayoutPlan) -> str:
         ]
     )
     for table, block in pending:
-        proposal = "<br>".join(block.lines[1:])
+        proposal = "<br>".join(position_split_lines(block))
         lines.append(f"| {table.id} {table.title} | `{block.id}` | {proposal} |")
     lines.append("")
     return "\n".join(lines)

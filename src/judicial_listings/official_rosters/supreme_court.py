@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import date
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -16,6 +16,7 @@ from ..roster_types import (
     RosterSection,
     clean_space,
     normalize_name,
+    parse_long_date,
     person_key,
 )
 
@@ -117,21 +118,20 @@ class _TableParser(HTMLParser):
             self._cell.append(data)
 
 
-def _format_appointment(value: str) -> str:
-    parsed = datetime.strptime(value, "%d %B %Y").replace(tzinfo=UTC)
-    return parsed.strftime("%d-%m-%y")
+def _parse_appointment(value: str) -> date:
+    return parse_long_date(value)
 
 
-def extract_profile_appointment(html: str) -> str:
+def extract_profile_appointment(html: str) -> date | None:
     parser = _VisibleTextParser()
     parser.feed(html)
     match = PROFILE_APPOINTMENT_RE.search(clean_space(" ".join(parser.parts)))
     if match is None:
-        return ""
-    return _format_appointment(match.group("date"))
+        return None
+    return _parse_appointment(match.group("date"))
 
 
-def extract_wikipedia_appointments(html: str) -> dict[str, str]:
+def extract_wikipedia_appointments(html: str) -> dict[str, date]:
     """Return the latest Supreme Court start date for each judge in the table."""
     parser = _TableParser()
     parser.feed(html)
@@ -154,7 +154,7 @@ def extract_wikipedia_appointments(html: str) -> dict[str, str]:
         if header_index < 0:
             continue
 
-        appointments: dict[str, str] = {}
+        appointments: dict[str, date] = {}
         for row in table[header_index + 1 :]:
             if len(row) <= max(judge_index, served_from_index):
                 continue
@@ -162,7 +162,7 @@ def extract_wikipedia_appointments(html: str) -> dict[str, str]:
             key = person_key(name)
             dates = FULL_DATE_RE.findall(row[served_from_index])
             if key and dates:
-                appointment = _format_appointment(dates[-1])
+                appointment = _parse_appointment(dates[-1])
                 appointments[key] = appointment
                 short_key = re.sub(r"\s+of\s+.+$", "", key)
                 appointments.setdefault(short_key, appointment)
@@ -175,7 +175,7 @@ def _add_appointment_dates(
     session: requests.Session,
     judges: list[Judge],
 ) -> list[Judge]:
-    profile_dates: dict[str, str] = {}
+    profile_dates: dict[str, date] = {}
     unresolved: list[Judge] = []
 
     for judge in judges:
@@ -184,14 +184,14 @@ def _add_appointment_dates(
             response.raise_for_status()
             appointment = extract_profile_appointment(response.text)
         except (requests.RequestException, ValueError):
-            appointment = ""
+            appointment = None
 
         if appointment:
             profile_dates[person_key(judge.name)] = appointment
         else:
             unresolved.append(judge)
 
-    wikipedia_dates: dict[str, str] = {}
+    wikipedia_dates: dict[str, date] = {}
     if unresolved:
         try:
             response = session.get(WIKIPEDIA_JUDGES_URL, timeout=30)
@@ -204,7 +204,7 @@ def _add_appointment_dates(
         judge.model_copy(
             update={
                 "appointment": profile_dates.get(person_key(judge.name))
-                or wikipedia_dates.get(person_key(judge.name), "")
+                or wikipedia_dates.get(person_key(judge.name))
             }
         )
         for judge in judges

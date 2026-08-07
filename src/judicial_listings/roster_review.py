@@ -19,6 +19,7 @@ from .roster_types import (
     JudicialSection,
     Roster,
     clean_space,
+    listing_name,
     normalize_name,
     person_key,
 )
@@ -268,7 +269,7 @@ def build_review(
 
 
 def _display_entry(entry: RosterEntry) -> str:
-    display = f"{entry.section.display_title}: {entry.judge.name}"
+    display = f"{entry.section.display_title}: {listing_name(entry.judge)}"
     if entry.judge.position:
         return f"{display} ({entry.judge.position})"
     return display
@@ -279,9 +280,10 @@ def _md_cell(value: str) -> str:
 
 
 def _entry_cell(entry: RosterEntry) -> str:
+    name = listing_name(entry.judge)
     if entry.judge.position:
-        return _md_cell(f"{entry.judge.name} ({entry.judge.position})")
-    return _md_cell(entry.judge.name)
+        return _md_cell(f"{name} ({entry.judge.position})")
+    return _md_cell(name)
 
 
 def _entries_by_section(
@@ -298,7 +300,10 @@ def _difference_text(difference: RosterDifference) -> str:
     official = difference.official
 
     if difference.kind is DifferenceKind.ADDED and official is not None:
-        return f"Add {_display_entry(official)}."
+        judge = listing_name(official.judge)
+        if official.judge.position:
+            judge = f"{judge} ({official.judge.position})"
+        return f"Add {judge} to the end of the {official.section.display_title} list."
     if difference.kind is DifferenceKind.REMOVED and rtf is not None:
         return f"Remove {_display_entry(rtf)}."
     if (
@@ -307,8 +312,9 @@ def _difference_text(difference: RosterDifference) -> str:
         and official is not None
     ):
         return (
-            f"Move {official.judge.name} from {rtf.section.display_title} "
-            f"to {official.section.display_title}."
+            f"Move {listing_name(official.judge)} from "
+            f"{rtf.section.display_title} to the end of "
+            f"{official.section.display_title}."
         )
     if (
         difference.kind is DifferenceKind.NAME_CHANGED
@@ -324,6 +330,19 @@ def _difference_text(difference: RosterDifference) -> str:
         current = rtf.judge.position or "(none)"
         source = official.judge.position or "(none)"
         return f"Change {official.judge.name}'s position from {current} to {source}."
+    if (
+        difference.kind is DifferenceKind.FIRST_LISTING_APPOINTMENT_CHANGED
+        and rtf is not None
+        and official is not None
+    ):
+        current = rtf.judge.first_listing_appointment
+        source = official.judge.first_listing_appointment
+        if current is not None and source is None:
+            return f"Remove {official.judge.name}'s appointment annotation."
+        return (
+            f"Change {official.judge.name}'s appointment annotation from "
+            f"{listing_name(rtf.judge)} to {listing_name(official.judge)}."
+        )
     if (
         difference.kind is DifferenceKind.ORDER_CHANGED
         and rtf is not None
@@ -353,6 +372,8 @@ def _person_review_type(item: PersonReviewItem) -> str:
         return "Name wording"
     if kinds == {DifferenceKind.POSITION_CHANGED}:
         return "Position wording"
+    if kinds == {DifferenceKind.FIRST_LISTING_APPOINTMENT_CHANGED}:
+        return "Appointment annotation"
     return "Person change"
 
 

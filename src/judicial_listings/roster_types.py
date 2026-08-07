@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import calendar
 import html
 import re
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -61,6 +62,35 @@ def person_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
 
+def appointment_annotation(value: date) -> str:
+    return f"appointed {value.day} {value:%B %Y}"
+
+
+def appointment_note(value: date) -> str:
+    return f"({appointment_annotation(value)})"
+
+
+def parse_long_date(value: str) -> date:
+    parts = clean_space(value).split()
+    if len(parts) != 3:
+        raise ValueError(f"expected 'D Month YYYY', got {value!r}")
+    day_text, month_text, year_text = parts
+    try:
+        month = list(calendar.month_name).index(month_text)
+        return date(int(year_text), month, int(day_text))
+    except ValueError as exc:
+        raise ValueError(f"invalid long date: {value!r}") from exc
+
+
+def parse_appointment_annotation(value: str) -> date | None:
+    match = re.fullmatch(
+        r"\(?appointed\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})\)?",
+        clean_space(value),
+        flags=re.IGNORECASE,
+    )
+    return parse_long_date(match.group(1).title()) if match else None
+
+
 class ImmutableModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
@@ -70,9 +100,16 @@ class Judge(ImmutableModel):
     position: str = ""
     url: str = ""
     source: str = ""
-    appointment: str = ""
+    appointment: date | None = None
+    first_listing_appointment: date | None = None
     extra_dates: tuple[str, ...] = ()
     lines: tuple[str, ...] = ()
+
+
+def listing_name(judge: Judge) -> str:
+    if judge.first_listing_appointment is None:
+        return judge.name
+    return f"{judge.name} {appointment_note(judge.first_listing_appointment)}"
 
 
 class SectionConfig(ImmutableModel):

@@ -11,6 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .official_rosters import fetch_official_roster
+from .publication_policy import apply_first_listing_policy
 from .roster_comparison import compare_rosters
 from .roster_review import (
     ReviewInputs,
@@ -77,12 +78,13 @@ def _prepare(source: Path, run_root: Path) -> PreparedRun:
     rtf_roster = extract_semantic_roster(rtf)
     rtf_geometry = extract_geometry(rtf)
     official_roster = fetch_official_roster()
-    comparison = compare_rosters(rtf_roster, official_roster)
+    publication_roster = apply_first_listing_policy(rtf_roster, official_roster)
+    comparison = compare_rosters(rtf_roster, publication_roster)
     created_at = datetime.now(UTC)
 
     review = build_review(
         rtf=rtf_roster,
-        official=official_roster,
+        official=publication_roster,
         comparison=comparison,
         inputs=ReviewInputs(
             source_rtf=str(source.resolve()),

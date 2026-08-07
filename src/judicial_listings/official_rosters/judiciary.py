@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from html.parser import HTMLParser
 from typing import TypedDict
 from urllib.parse import urljoin
@@ -161,6 +162,12 @@ def _cell_lines(raw: str) -> list[str]:
     return [line for line in lines if line]
 
 
+def _appointment_date(value: str) -> date:
+    day, month, short_year = (int(part) for part in value.split("-"))
+    year = short_year + 2000 if short_year < 100 else short_year
+    return date(year, month, day)
+
+
 def _parse_page(
     session: requests.Session,
     section: SectionConfig,
@@ -200,7 +207,9 @@ def _parse_page(
                 position=position,
                 url=urljoin(final_url, row[0]["url"]) if row[0]["url"] else "",
                 source=final_url,
-                appointment=second_lines[0] if second_lines else "",
+                appointment=(
+                    _appointment_date(second_lines[0]) if second_lines else None
+                ),
                 extra_dates=tuple(second_lines[1:]),
             )
         )
