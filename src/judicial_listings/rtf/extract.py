@@ -13,7 +13,7 @@ from ..roster_types import (
     clean_space,
     normalize_name,
 )
-from .text import TableOccurrence, decode_cells, find_table_body
+from .text import RevisionView, TableOccurrence, decode_cells, find_table_body
 
 NAME_RE = re.compile(
     r"^(?:Baroness|Dame|Sir|Lord Justice|Lady Justice|Mr Justice|Mrs Justice|"
@@ -27,9 +27,19 @@ def trim_trailing_empty(values: list[str]) -> list[str]:
     return values
 
 
-def extract_columns(rtf: str, occurrence: TableOccurrence) -> dict[str, list[str]]:
+def extract_columns(
+    rtf: str,
+    occurrence: TableOccurrence,
+    *,
+    revision_view: RevisionView = RevisionView.ACCEPTED,
+    preserve_line_breaks: bool = False,
+) -> dict[str, list[str]]:
     start, end = find_table_body(rtf, occurrence)
-    cells = decode_cells(rtf[start:end])
+    cells = decode_cells(
+        rtf[start:end],
+        revision_view=revision_view,
+        preserve_line_breaks=preserve_line_breaks,
+    )
     left = trim_trailing_empty(cells[0::2])
     right = trim_trailing_empty(cells[1::2])
     return {"left": left, "right": right}

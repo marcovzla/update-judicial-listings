@@ -316,7 +316,7 @@ def render_layout(
     plan: LayoutPlanFile,
     output: UpdatedRtfOutput,
 ) -> None:
-    """Render an updated RTF from a layout plan."""
+    """Render an updated RTF with actual changes tracked as revisions."""
     try:
         render_rtf(source, load_plan(plan), output)
     except (OSError, RuntimeError, ValueError) as exc:

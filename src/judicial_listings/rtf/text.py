@@ -17,12 +17,39 @@ re-emit) easy to reason about and test.
 from __future__ import annotations
 
 from contextlib import suppress
+from enum import StrEnum
 from typing import NewType
 
 TableOccurrence = NewType("TableOccurrence", int)
 RtfOffset = NewType("RtfOffset", int)
 
+
+class RevisionView(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
 # --- structure: locate a judge table's editable body --------------------------
+
+
+def group_end(rtf: str, start: int) -> int:
+    """Return the offset immediately after the RTF group beginning at ``start``."""
+    if rtf[start : start + 1] != "{":
+        raise ValueError("RTF group does not start with an opening brace")
+
+    depth = 0
+    index = start
+    while index < len(rtf):
+        if rtf[index] == "\\" and rtf[index + 1 : index + 2] in "{}\\":
+            index += 2
+            continue
+        if rtf[index] == "{":
+            depth += 1
+        elif rtf[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    raise ValueError("RTF group is not closed")
 
 
 def _find_real_marker(rtf: str, marker: str, occurrence: TableOccurrence) -> RtfOffset:
@@ -162,8 +189,13 @@ def _skip_fallback_units(body: str, pos: int, count: int) -> int:
     return pos
 
 
-def decode_cells(body: str) -> list[str]:
-    """Return the visible text of each table cell in a table body, in order."""
+def decode_cells(
+    body: str,
+    *,
+    revision_view: RevisionView = RevisionView.ACCEPTED,
+    preserve_line_breaks: bool = False,
+) -> list[str]:
+    """Return cell text as shown after accepting or rejecting revisions."""
     cells: list[str] = []
     buf: list[str] = []
     i = 0
@@ -172,6 +204,16 @@ def decode_cells(body: str) -> list[str]:
     while i < n:
         ch = body[i]
         if ch == "{":
+            hidden_revision = (
+                revision_view is RevisionView.ACCEPTED
+                and body.startswith(r"{\deleted", i)
+            ) or (
+                revision_view is RevisionView.REJECTED
+                and body.startswith(r"{\revised", i)
+            )
+            if hidden_revision:
+                i = group_end(body, i)
+                continue
             # Skip ignorable destinations {\* ... } entirely.
             if body[i + 1 : i + 3] == "\\*":
                 depth = 1
@@ -223,6 +265,8 @@ def decode_cells(body: str) -> list[str]:
                         uc = int(param)
                 elif name in SPECIAL_WORDS:
                     buf.append(SPECIAL_WORDS[name])
+                elif name == "line" and preserve_line_breaks:
+                    buf.append("\n")
                 elif name == "par":
                     buf.append(" ")
                 # other control words are formatting; ignore

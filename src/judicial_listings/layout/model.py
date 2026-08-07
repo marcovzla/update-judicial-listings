@@ -43,10 +43,20 @@ class LayoutPlan(ImmutableModel):
     tables: tuple[LayoutTable, ...]
 
 
+class ExpandedLine(ImmutableModel):
+    block_id: str
+    text: str
+    line_index: int
+
+    @property
+    def is_first(self) -> bool:
+        return self.line_index == 0
+
+
 class ExpandedTable(ImmutableModel):
     section: JudicialSection
-    left: tuple[str, ...]
-    right: tuple[str, ...]
+    left: tuple[ExpandedLine, ...]
+    right: tuple[ExpandedLine, ...]
 
     @property
     def occurrence(self) -> int:
@@ -144,6 +154,7 @@ def validate_table(table: LayoutTable, *, require_no_pending: bool = False) -> N
             f"table {table.id}: column_break_after does not name a block: "
             f"{table.column_break_after}"
         )
+
 
 def validate_block(block: LayoutBlock, *, require_no_pending: bool = False) -> None:
     if not block.name:
@@ -296,12 +307,19 @@ def expand_table(table: LayoutTable) -> ExpandedTable:
         else block_ids.index(table.column_break_after)
     )
 
-    left: list[str] = []
-    right: list[str] = []
+    left: list[ExpandedLine] = []
+    right: list[ExpandedLine] = []
 
     for index, block in enumerate(table.blocks):
         column_lines = left if index <= break_index else right
-        column_lines.extend(block.lines)
+        column_lines.extend(
+            ExpandedLine(
+                block_id=block.id,
+                text=line,
+                line_index=line_index,
+            )
+            for line_index, line in enumerate(block.lines)
+        )
 
     return ExpandedTable(
         section=table.section,
